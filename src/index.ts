@@ -9,7 +9,7 @@ const app = express();
 
 const originArr: string[] = [
   "http://localhost:3000",
-  "https://sameerdataneuron.netlify.app/"
+  "https://sameerdataneuron.netlify.app"
 ];
 
 app.use(cors({ credentials: true, origin: originArr}));
