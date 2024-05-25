@@ -20,17 +20,7 @@ export const countApi = async (
   const prefix = prefixes[prefixes.length - 1];
   console.log(prefix);
 
-  if (prefix === "updateProduct") {
-    if (!getUser.updateProductCount) {
-      getUser.updateProductCount = 0;
-    }
-    getUser.updateProductCount++;
-  } else if (prefix === "addProduct") {
-    if (!getUser.addProductCount) {
-      getUser.addProductCount = 0;
-    }
-    getUser.addProductCount++;
-  }
+ 
 
   await getUser.save();
 

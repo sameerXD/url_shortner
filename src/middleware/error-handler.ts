@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { validationResult } from "express-validator";
+require("express-async-errors");
 
 // if i give 4 arguements to a middleware node/express automatically figures that this middleware handles error
 export const errorHandler = async (
@@ -8,11 +9,14 @@ export const errorHandler = async (
   res: Response,
   next: NextFunction
 ) => {
-  let errBody: { name: string; message: string } = JSON.parse(err.message);
-  console.log(errBody);
+  if (err instanceof ApiError) {
+    return res.status(err.statusCode).send({
+      errors: [{ message: err.message }],
+    });
+  }
 
-  if (errBody.name === "validationError") {
-    let formattedError = JSON.parse(errBody.message).map((error: any) => {
+  if (err instanceof validationError) {
+    let formattedError = JSON.parse(err.message).map((error: any) => {
       return { message: error.msg, field: error.path };
     });
     return res.status(400).send({
@@ -21,9 +25,31 @@ export const errorHandler = async (
   }
 
   res.status(400).send({
-    errors: [{ message: errBody.message }],
+    errors: [{ message: err.message }],
   });
 };
+
+export class ApiError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = this.constructor.name;
+    this.statusCode = statusCode;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+export class validationError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = this.constructor.name;
+    this.statusCode = statusCode;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
 
 export const validateRequest = async (
   req: Request,
@@ -33,15 +59,7 @@ export const validateRequest = async (
   const errors = validationResult(req);
 
   if (!errors.isEmpty()) {
-    // this line is commented intentionally
-    //   return res.status(400).send(errors.array());
-
-    // instead let the application throw error
-    let err = {
-      name: "validationError",
-      message: JSON.stringify(errors.array()),
-    };
-    return next(new Error(JSON.stringify(err)));
+    throw new validationError(JSON.stringify(errors.array()), 400);
   }
 
   next();

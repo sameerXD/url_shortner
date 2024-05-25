@@ -1,138 +1,183 @@
 import express, { NextFunction, Request, Response } from "express";
 import { body, validationResult } from "express-validator";
-import User, { IProduct } from "../database/models/User";
-import { validateRequest } from "../middleware/error-handler";
-import { countApi } from "../middleware/utils";
+import User, { IURL } from "../database/models/User";
+import { ApiError, validateRequest } from "../middleware/error-handler";
+import { countApi } from "../utils/utils";
+import { comparePassword, encryptPassword } from "../utils/passwordUtils";
+import { generateToken } from "../utils/jwtUtils";
+import { authMiddleware } from "../middleware/auth";
+import { generateHash } from "../utils/hashingUtils";
+import Url from "../database/models/URL";
+require("express-async-errors");
+require("dotenv").config();
 
 const router = express.Router();
 
+const baseUrl = process.env.BASE_URL;
+
+router.post(
+  "/user/register",
+  [
+    body("email").isEmail().withMessage("email must be valid!"),
+    body("password").isString().withMessage("password must be valid!"),
+    body("name").isString().withMessage("name must be valid!"),
+  ],
+  validateRequest,
+  async (req: Request, res: Response) => {
+    const { email, name, password } = req.body;
+
+    const getUser = await User.findOne({
+      email,
+    });
+
+    if (getUser)
+      throw new ApiError(`user with email ${email} already exists`, 400);
+
+    let passwordHash = await encryptPassword(password);
+
+    const user = await User.create({
+      email: email,
+      name: name,
+      password: passwordHash,
+    });
+
+    await user.save();
+
+    res.send(user);
+  }
+);
+
 router.post(
   "/user/login",
-  [body("email").isEmail().withMessage("email must be valid!")],
+  [
+    body("email").isEmail().withMessage("email must be valid!"),
+    body("password").isString().withMessage("password must be valid!"),
+  ],
   validateRequest,
   async (req: Request, res: Response, next: NextFunction) => {
-    const { email } = req.body;
-
-    // these lines are commented intentionally segregated this code repetition into a middleware
-
-    // const errors = validationResult(req);
-
-    // if (!errors.isEmpty()) {
-    //   //   return res.status(400).send(errors.array());
-
-    //   // instead let the application throw error
-    //   let err = {
-    //     name:"validationError",
-    //     message:JSON.stringify(errors.array())
-    //   }
-    //   return next(new Error(JSON.stringify(err)));
-    // }
+    const { email, password } = req.body;
 
     const getUser = await User.findOne({
       email: email,
     });
 
-    if (!getUser) {
-      const postUser = await User.create({
-        email: email,
-      });
-      await postUser.save();
-      return res.send(postUser);
-    }
-    res.send(getUser);
-  }
-);
-
-router.post(
-  "/user/addProduct",
-  [
-    body("email").isEmail().withMessage("email must be valid!"),
-    body("productName").isString().notEmpty(),
-    body("color").isString().notEmpty(),
-    body("category").isString().notEmpty(),
-    body("price").isNumeric(),
-  ],
-  validateRequest,
-  countApi,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { email, productName, color, category, price } = req.body;
-
-    const getUser = await User.findOne({ email });
     if (!getUser)
-      return next(
-        new Error(
-          JSON.stringify({
-            name: "NotFoundError",
-            message: `user with email ${email} not found`,
-          })
-        )
-      );
+      throw new ApiError(`user with email ${email} does not exits`, 400);
 
-    const product: IProduct = {
-      productName,
-      color,
-      category,
-      price,
-    };
+    const isPasswordCorrect = await comparePassword(password, getUser.password);
 
-    getUser.products = getUser.products
-      ? [...getUser.products, product]
-      : [product];
+    if (!isPasswordCorrect) throw new ApiError(`Invalid password`, 401);
 
-    await getUser.save();
-
-    res.send(getUser);
+    res.send({ user: getUser, token: await generateToken(getUser.id) });
   }
 );
 
 router.put(
-  "/user/updateProduct",
+  "/user/shortenUrl",
   [
-    body("email").isEmail().withMessage("email must be valid!"),
-    body("productName").isString().notEmpty(),
-    body("productId").isString().notEmpty(),
-    body("color").isString().notEmpty(),
-    body("category").isString().notEmpty(),
-    body("price").isNumeric(),
+    body("originalUrl").isString().withMessage("originalUrl must be valid!"),
+    body("maxUses").isNumeric().withMessage("maxUses must be valid!"),
   ],
   validateRequest,
-  countApi,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { email, productId, productName, color, category, price } = req.body;
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    const { originalUrl, maxUses } = req.body;
 
-    const getUser = await User.findOne({ email });
-    if (!getUser)
-      return next(
-        new Error(
-          JSON.stringify({
-            name: "NotFoundError",
-            message: `user with email ${email} not found`,
-          })
-        )
-      );
+    const hash = generateHash(originalUrl);
 
-    let product = getUser.products?.filter(
-      (product) => product._id == productId
-    );
+    let url = await Url.findOne({
+      userId: req.user,
+      hash: hash,
+    });
 
-    if (!product || product?.length === 0)
-      return next(
-        new Error(
-          JSON.stringify({
-            name: "NotFoundError",
-            message: `product with id ${productId} not found`,
-          })
-        )
-      );
-    let updateProduct = product[0];
-    updateProduct.category = category;
-    updateProduct.color = color;
-    updateProduct.price = price;
-    updateProduct.productName = productName;
+    if (url) {
+      url.maxUses = maxUses;
+      url.maxUses = maxUses || null;
+      url.remainingUses = maxUses || null;
 
-    await getUser.save();
+      await url.save();
+      return res.json({
+        shortUrl: `${baseUrl}/user/redirectUrl/${req.user}/${url.hash}`,
+      });
+    }
 
-    res.send(getUser);
+    url = new Url({
+      originalUrl,
+      hash,
+      maxUses: maxUses || null,
+      remainingUses: maxUses || null,
+      userId: req.user,
+    });
+
+    await url.save();
+
+    return res.json({
+      shortUrl: `${baseUrl}/user/redirectUrl/${req.user}/${url.hash}`,
+    });
+  }
+);
+
+router.delete(
+  "/user/deleteHash",
+  [body("hash").isString().withMessage("originalUrl must be valid!")],
+  validateRequest,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    const { hash } = req.body;
+
+    await Url.deleteOne({
+      userId: req.user,
+      hash: hash,
+    });
+    res.send({});
+  }
+);
+
+router.get(
+  "/user/allUrls",
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    const getAll = await Url.find({
+      userId: req.user,
+    });
+
+    let fin = [];
+
+    for (let url of getAll) {
+      let temp: any = url;
+      let tempObj = {
+        ...temp._doc,
+        fullUrl: url.hash,
+      };
+      fin.push(tempObj);
+    }
+    res.send(fin);
+  }
+);
+
+router.get(
+  "/user/redirectUrl/:userId/:hash",
+  async (req: Request, res: Response) => {
+    const { hash, userId } = req.params;
+
+    const url = await Url.findOne({ hash, userId });
+
+    if (!url) {
+      throw new ApiError("url not found", 404);
+    }
+
+    if (url.remainingUses !== undefined && url.remainingUses <= 0) {
+      throw new ApiError("api usage exhausted!", 410);
+    }
+
+    if (url.remainingUses) {
+      url.remainingUses--;
+    }
+
+    url.clicks++;
+    await url.save();
+
+    res.send({ url: url.originalUrl });
   }
 );
 

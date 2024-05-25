@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema, model } from "mongoose";
 
-export interface IProduct {
+export interface IURL {
   _id?: mongoose.Types.ObjectId;
   productName: string;
   color: string;
@@ -10,29 +10,29 @@ export interface IProduct {
 export interface IUser extends Document {
   name?: string;
   email: string;
-  password?: string;
-  products?: IProduct[];
-  addProductCount?:number;
-  updateProductCount?:number;
-
+  password: string;
+  urls?: IURL[];
 }
 
-const userSchema = new Schema<IUser>({
-  name: String,
-  email: { type: String, unique: true, required: true },
-  password: String,
-  products: [
-    {
-      _id: { type: Schema.Types.ObjectId, auto: true }, // Product ID
-      productName: String,
-      color: String,
-      category: String,
-      price: String,
-    },
-  ],
-  addProductCount:{type:Number, default:0},
-  updateProductCount:{type:Number, default:0}
-});
+const userSchema = new Schema<IUser>(
+  {
+    name: String,
+    email: { type: String, unique: true, required: true },
+    password: String,
+    urls: [
+      {
+        _id: { type: Schema.Types.ObjectId, auto: true }, // Product ID
+        productName: String,
+        color: String,
+        category: String,
+        price: String,
+      },
+    ],
+  },
+  {
+    timestamps: true,
+  }
+);
 
 const User = model<IUser>("User", userSchema);
 
