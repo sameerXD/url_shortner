@@ -1,6 +1,6 @@
 import express, { NextFunction, Request, Response } from "express";
 import { body, validationResult } from "express-validator";
-import User, { IURL } from "../database/models/User";
+import User from "../database/models/User";
 import { ApiError, validateRequest } from "../middleware/error-handler";
 import { countApi } from "../utils/utils";
 import { comparePassword, encryptPassword } from "../utils/passwordUtils";
@@ -43,7 +43,7 @@ router.post(
 
     await user.save();
 
-    res.send(user);
+    res.send({user: getUser, token: await generateToken(user.id) });
   }
 );
 
@@ -117,7 +117,7 @@ router.put(
   }
 );
 
-router.delete(
+router.post(
   "/user/deleteHash",
   [body("hash").isString().withMessage("originalUrl must be valid!")],
   validateRequest,
@@ -177,7 +177,7 @@ router.get(
     url.clicks++;
     await url.save();
 
-    res.send({ url: url.originalUrl });
+    res.status(302).redirect(`http://${url.originalUrl}`);
   }
 );
 
